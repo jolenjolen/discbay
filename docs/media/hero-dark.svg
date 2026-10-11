@@ -44,7 +44,7 @@
     </g>
   </defs>
 
-  <rect width="1200" height="560" fill="#000000"/>
+  <rect width="1200" height="560" rx="16" fill="#000000"/>
   <ellipse cx="600" cy="360" rx="460" ry="300" fill="url(#glow)"/>
 
   <!-- the disc -->
