@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "discbay"
+version = "0.3.0"
+description = "Console-style disc launcher for Linux: insert a CD, a notification island appears, your app starts."
+readme = "README.md"
+requires-python = ">=3.11"
+# PyGObject and Flask come from the distro (Fedora: python3-gobject python3-flask)
+# because PyGObject needs system GLib; install with `pipx install --system-site-packages .`
+dependencies = []
+authors = [{ name = "Jolen" }]
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Operating System :: POSIX :: Linux",
+  "Environment :: No Input/Output (Daemon)",
+  "Topic :: Games/Entertainment",
+]
+
+[project.urls]
+Homepage = "https://github.com/jolenjolen/discbay"
+Issues = "https://github.com/jolenjolen/discbay/issues"
+
+[project.optional-dependencies]
+studio = ["flask>=2.2"]
+
+[project.scripts]
+discbayd = "discbay.service:main"
+discbay-ctl = "discbay.ctl:main"
+discbay-studio = "discbay.studio:main"
+
+[tool.setuptools]
+packages = ["discbay"]
+
+[tool.setuptools.package-data]
+discbay = ["studio_static/*"]

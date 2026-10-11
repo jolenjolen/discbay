@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # DiscBay uses the distro's PyGObject (it needs system GLib), so test
+      # with the system Python and apt packages rather than a venv.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-glib-2.0 python3-flask xorriso
+
+      - name: Run tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Check the JavaScript parses
+        run: |
+          node --check discbay/studio_static/studio.js
+          node --check discbay/studio_static/labels.js

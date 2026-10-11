@@ -1,0 +1,15 @@
+[Unit]
+Description=DiscBay Studio (web app for making launcher discs, localhost:8404)
+Documentation=https://github.com/jolenjolen/discbay
+After=discbayd.service
+Wants=discbayd.service
+
+[Service]
+# Listens on 127.0.0.1 only. Change the port with DISCBAY_STUDIO_PORT.
+Environment=DISCBAY_STUDIO_PORT=8404
+ExecStart=%h/.local/bin/discbay-studio
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

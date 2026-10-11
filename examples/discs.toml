@@ -1,0 +1,66 @@
+# DiscBay disc registry. Copy to ~/.config/discbay/discs.toml
+# After editing, run:  discbay-ctl reload
+#
+# You only need entries here for discs WITHOUT their own manifest (old CDs
+# you already own), or to change a setting on a burned disc. Discs made with
+# `discbay-ctl make-disc` describe themselves; an entry here overrides only
+# the keys you write, e.g.  [discs.OPENTTD]  on_eject = "close"
+#
+# Each disc is matched by its ISO 9660 volume label. Find it with:
+#   discbay-ctl probe
+
+[settings]
+device = "/dev/sr0"
+countdown = 5            # seconds before autostart
+poll_interval_ms = 200   # how often the drive is checked
+spinup_timeout = 40      # give up on unreadable discs after this long
+
+# Discs that carry their own discbay.toml manifest:
+#   "ask"    show what the disc wants to run and ask once (default)
+#   "always" trust every disc (only if you burn all your discs yourself)
+#   "never"  use the disc's name and cover art, but never launch from it
+disc_manifests = "ask"
+
+
+# ----------------------------------------------------------------------------
+# Launch targets: pick exactly ONE per disc
+#
+#   app     = "org.kde.kate"           installed app by desktop ID (native, Flatpak, Snap)
+#   exec    = "~/Apps/Game.AppImage"   a program file, optionally with args = ["--x"]
+#   steam   = 367520                   a Steam game
+#   url     = "https://..."            a URL or file, opened with its default app
+#   command = "retroarch -L ..."       any full command line
+#
+# Find an app's desktop ID with:   ls /usr/share/applications ~/.local/share/applications
+#                                  flatpak list --app --columns=application
+# ----------------------------------------------------------------------------
+
+[discs.BLENDER]
+name = "Blender"
+app = "org.blender.Blender"       # the Flatpak's ID works the same as a native app's
+color = "#f5792a"
+on_eject = "close"                # pulling the disc closes the app, like a cartridge
+
+[discs.CELESTE]
+name = "Celeste"
+exec = "~/Games/Celeste/Celeste"
+args = ["--fullscreen"]
+color = "#d6336c"
+art = "~/.config/discbay/art/celeste.png"
+
+[discs.HOLLOW_01]
+name = "Hollow Knight"
+subtitle = "Team Cherry"
+steam = 367520
+color = "#5b6cff"
+
+[discs.RETRO]
+name = "Retro corner"
+command = "flatpak run org.libretro.RetroArch --menu"
+color = "#9b59b6"
+countdown = 3
+
+[discs.LECTURES]
+name = "Lecture notes"
+url = "~/Documents/uni/notes"     # opens the folder in your file manager
+autostart = false                 # island offers a Start button instead of a countdown

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>DiscBay Studio</title>
+  <link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="var(--accent)"/>
+        <circle cx="16" cy="16" r="5" fill="none" stroke="var(--canvas)" stroke-width="2.5"/>
+      </svg>
+      <span>DiscBay Studio</span>
+    </div>
+    <div class="drive" id="drive" role="status" aria-live="polite">
+      <span class="drive-dot"></span>
+      <span class="drive-text">
+        <span class="drive-main" id="driveMain">Looking for your drive</span>
+        <span class="drive-sub" id="driveSub"></span>
+      </span>
+      <button class="link-button" id="ejectBtn" hidden>Eject</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- The stage: what the disc will look like when it's inserted -->
+    <section class="stage" aria-label="Preview">
+      <div class="island-preview" id="islandPreview">
+        <div class="mini-disc" id="miniDisc"></div>
+        <div class="island-text">
+          <div class="island-title" id="islandTitle">Your disc</div>
+          <div class="island-sub" id="islandSub">Inserted, starting in 5</div>
+        </div>
+        <div class="island-buttons" id="islandButtons">
+          <span class="island-btn">Cancel</span>
+          <span class="island-btn primary">Start</span>
+        </div>
+      </div>
+
+      <div class="disc-wrap">
+        <svg class="progress-ring" id="progressRing" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="ring-track" cx="50" cy="50" r="48.5"/>
+          <circle class="ring-fill" id="ringFill" cx="50" cy="50" r="48.5" pathLength="100"/>
+        </svg>
+        <div class="disc" id="disc">
+          <div class="disc-cover" id="discCover"></div>
+          <div class="disc-sheen"></div>
+          <div class="disc-hub"></div>
+        </div>
+      </div>
+      <p class="stage-caption" id="stageCaption">This is how your disc will look in the drive.</p>
+    </section>
+
+    <!-- The form: four steps, in order -->
+    <form class="steps" id="form" autocomplete="off" novalidate>
+      <h1>Make a disc</h1>
+      <p class="lede">Choose what it opens, give it a cover, and burn it. A CD-R made here can be rewritten about 40 times.</p>
+
+      <section class="step" aria-labelledby="s1">
+        <h2 id="s1"><span class="step-num">1</span>What should it open?</h2>
+        <div class="segmented" role="tablist" aria-label="Kind of app">
+          <button type="button" role="tab" class="seg" data-source="apps" aria-selected="true">Apps</button>
+          <button type="button" role="tab" class="seg" data-source="steam" aria-selected="false">Steam</button>
+          <button type="button" role="tab" class="seg" data-source="appimages" aria-selected="false">AppImages</button>
+          <button type="button" role="tab" class="seg" data-source="other" aria-selected="false">Other</button>
+        </div>
+
+        <div class="source" data-panel="apps">
+          <div class="search-row">
+            <input type="search" id="appSearch" placeholder="Search your apps" aria-label="Search your apps">
+            <label class="chip"><input type="checkbox" id="gamesOnly"> Games only</label>
+          </div>
+          <div class="tiles" id="appTiles" role="listbox" aria-label="Installed apps"></div>
+        </div>
+
+        <div class="source" data-panel="steam" hidden>
+          <div class="tiles tiles-art" id="steamTiles" role="listbox" aria-label="Steam games"></div>
+        </div>
+
+        <div class="source" data-panel="appimages" hidden>
+          <div class="rows" id="appimageRows" role="listbox" aria-label="AppImages"></div>
+        </div>
+
+        <div class="source" data-panel="other" hidden>
+          <div class="field-grid">
+            <label class="field">
+              <span>Type</span>
+              <select id="otherKind">
+                <option value="exec">A program file</option>
+                <option value="url">A website, file or folder</option>
+                <option value="command">A command</option>
+                <option value="steam">A Steam game by ID</option>
+              </select>
+            </label>
+            <label class="field grow">
+              <span id="otherLabel">Path to the program</span>
+              <input type="text" id="otherTarget" placeholder="~/Games/Celeste/Celeste">
+            </label>
+          </div>
+        </div>
+
+        <p class="note" id="targetNote" aria-live="polite"></p>
+      </section>
+
+      <section class="step" aria-labelledby="s2">
+        <h2 id="s2"><span class="step-num">2</span>Give it a cover</h2>
+        <div class="cover-row">
+          <div class="dropzone" id="dropzone" tabindex="0" role="button"
+               aria-label="Drop an image here, or press Enter to choose one">
+            <canvas id="cropCanvas" width="480" height="480" aria-hidden="true"></canvas>
+            <div class="drop-hint" id="dropHint">
+              <strong>Drop an image</strong>
+              <span>or click to choose one</span>
+            </div>
+            <input type="file" id="fileInput" accept="image/*" hidden>
+          </div>
+          <div class="cover-tools">
+            <p class="muted" id="cropHelp">Any shape works. It's cropped to a square around the most detailed part, and you can drag to adjust.</p>
+            <label class="field">
+              <span>Zoom</span>
+              <input type="range" id="zoom" min="1" max="3" step="0.01" value="1" disabled>
+            </label>
+            <div class="button-row">
+              <button type="button" class="pill" id="autoCrop" disabled>Recentre</button>
+              <button type="button" class="pill" id="useIcon" disabled>Use the app's icon</button>
+              <button type="button" class="pill" id="useSteamArt" hidden>Use Steam's artwork</button>
+              <button type="button" class="pill quiet" id="clearCover" hidden>Remove</button>
+            </div>
+            <label class="field color-field">
+              <span>Disc colour</span>
+              <span class="color-row">
+                <input type="color" id="color" value="#2f6feb">
+                <span class="muted" id="colorNote">Picked from the cover</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="step" aria-labelledby="s3">
+        <h2 id="s3"><span class="step-num">3</span>Details</h2>
+        <div class="field-grid">
+          <label class="field grow">
+            <span>Name</span>
+            <input type="text" id="name" maxlength="60" placeholder="OpenTTD" required>
+          </label>
+          <label class="field grow">
+            <span>Subtitle <em>optional</em></span>
+            <input type="text" id="subtitle" maxlength="60" placeholder="Transport tycoon">
+          </label>
+        </div>
+        <div class="switch-list">
+          <label class="switch-row">
+            <span><strong>Start automatically</strong><span class="muted">After a short countdown you can cancel</span></span>
+            <span class="switch-controls">
+              <input type="number" id="countdown" min="0" max="30" step="1" value="5" aria-label="Seconds before starting">
+              <input type="checkbox" class="switch" id="autostart" checked>
+            </span>
+          </label>
+          <label class="switch-row">
+            <span><strong>Close it when the disc comes out</strong><span class="muted">Like pulling a cartridge</span></span>
+            <input type="checkbox" class="switch" id="closeOnEject" checked>
+          </label>
+        </div>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="field-grid">
+            <label class="field">
+              <span>Disc label</span>
+              <input type="text" id="label" maxlength="32" pattern="[A-Za-z0-9_]{1,32}" spellcheck="false">
+            </label>
+            <label class="field grow">
+              <span>Extra arguments <em>for apps and program files</em></span>
+              <input type="text" id="args" placeholder="--fullscreen" spellcheck="false">
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <section class="step" aria-labelledby="s4">
+        <h2 id="s4"><span class="step-num">4</span>Burn</h2>
+        <p class="burn-status" id="burnStatus">Insert a blank CD-R, or a DiscBay disc to rewrite.</p>
+        <label class="switch-row compact">
+          <span><strong>Lock the disc</strong><span class="muted">It can never be changed again</span></span>
+          <input type="checkbox" class="switch" id="final">
+        </label>
+        <div class="burn-actions">
+          <button type="submit" class="primary-button" id="burnBtn" disabled>Burn disc</button>
+          <button type="button" class="link-button" id="isoBtn">Save as a disc image instead</button>
+          <button type="button" class="link-button" id="labelsBtn">Print labels</button>
+        </div>
+        <p class="error" id="formError" role="alert"></p>
+      </section>
+    </form>
+  </main>
+
+  <dialog class="sheet" id="confirm">
+    <form method="dialog">
+      <h3 id="confirmTitle">Replace this disc?</h3>
+      <p id="confirmBody"></p>
+      <div class="sheet-buttons">
+        <button value="cancel" class="pill">Cancel</button>
+        <button value="ok" class="primary-button" id="confirmOk">Replace</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="sheet labels-sheet" id="labelDialog" aria-labelledby="labelsTitle">
+    <div class="labels-layout">
+      <canvas id="sheetPreview" width="210" height="297" aria-label="Preview of the label sheet"></canvas>
+      <div class="labels-options">
+        <h3 id="labelsTitle">Print labels</h3>
+        <p>For Label Planet LPCD118P sheets: two disc labels and two spines per A4 sheet.</p>
+
+        <span class="option-label">Print on</span>
+        <div class="segmented" role="tablist" aria-label="Which labels on the sheet">
+          <button type="button" class="seg" role="tab" data-slots="top" aria-selected="true">Top</button>
+          <button type="button" class="seg" role="tab" data-slots="bottom" aria-selected="false">Bottom</button>
+          <button type="button" class="seg" role="tab" data-slots="top,bottom" aria-selected="false">Both</button>
+        </div>
+        <p class="hint">Used the top labels already? Print on the bottom ones with the same sheet.</p>
+
+        <div class="switch-list">
+          <label class="switch-row">
+            <span><strong>Disc label</strong></span>
+            <input type="checkbox" class="switch" id="labelDisc" checked>
+          </label>
+          <label class="switch-row">
+            <span><strong>Name on the disc</strong><span class="muted">Turn off if the cover already shows it</span></span>
+            <input type="checkbox" class="switch" id="labelName" checked>
+          </label>
+          <label class="switch-row">
+            <span><strong>Case spine</strong><span class="muted">Fold it around the case's edge</span></span>
+            <input type="checkbox" class="switch" id="labelSpine" checked>
+          </label>
+        </div>
+
+        <details class="advanced">
+          <summary>Alignment</summary>
+          <p class="hint">If labels print slightly off, move them here. Remembered for next time.</p>
+          <div class="field-grid">
+            <label class="field"><span>Right (mm)</span><input type="number" id="nudgeX" step="0.5" min="-10" max="10" value="0"></label>
+            <label class="field"><span>Down (mm)</span><input type="number" id="nudgeY" step="0.5" min="-10" max="10" value="0"></label>
+          </div>
+          <button type="button" class="pill" id="printTest">Print an alignment test</button>
+        </details>
+
+        <p class="hint">In the print dialog, choose A4, 100% or actual size, and no margins.</p>
+        <div class="sheet-buttons">
+          <button type="button" class="pill" id="closeLabels">Close</button>
+          <button type="button" class="primary-button" id="printLabels">Print</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/studio.js" type="module"></script>
+</body>
+</html>
