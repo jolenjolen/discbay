@@ -2,7 +2,7 @@
 
 Name:           discbay
 Version:        0.3.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Console-style disc launcher: insert a CD and your game starts
 
 License:        GPL-3.0-or-later
@@ -91,5 +91,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/me.jolen.DiscBay.Stud
 %{_datadir}/icons/hicolor/scalable/apps/me.jolen.DiscBay.svg
 
 %changelog
+* Mon Oct 12 2026 Jolen <jolenjolen@users.noreply.github.com> - 0.3.0-2
+- Start apps with the desktop session's environment; wait for the desktop at boot
+- Island: follow KDE panels live and per screen, fix the clipped shadow
+
 * Sun Oct 11 2026 Jolen <jolenjolen@users.noreply.github.com> - 0.3.0-1
 - First RPM: daemon, notification island, DiscBay Studio, label printing

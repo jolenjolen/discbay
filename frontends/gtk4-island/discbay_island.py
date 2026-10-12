@@ -17,12 +17,14 @@ import json
 import math
 import os
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import time
 import wave
 from pathlib import Path
+from typing import Callable
 
 # --- gtk4-layer-shell must be loaded before libwayland-client -----------------
 # The library has to come first in the link order, so we re-exec ourselves with
@@ -64,18 +66,23 @@ OBJECT_PATH = "/me/jolen/DiscBay1"
 INTERFACE = "me.jolen.DiscBay1"
 SUPPORTED_PROTOCOL = 1
 
-TOP_MARGIN = 14
+# Gap between the top of the screen (or a panel) and the island, in px. The
+# pill's CSS margin adds to it: the surface is bigger than the pill so its
+# shadow fits inside, instead of being cut off in a square.
+TOP_MARGIN = 2
+PILL_MARGIN_TOP, PILL_MARGIN_SIDE, PILL_MARGIN_BOTTOM = 16, 36, 44
 DEFAULT_DISC_COLOR = "#8a8fa3"
 ACCENT = "#ffffff"
 
-CSS = b"""
-window.discbay-island { background: transparent; }
+CSS = (b"""
+window.discbay-island { background: transparent; box-shadow: none; border: none; }
 .island {
   background: rgba(12, 12, 16, 0.94);
   border-radius: 999px;
   padding: 9px 10px 9px 9px;
-  margin: 4px 16px 22px 16px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  margin: %dpx %dpx %dpx %dpx;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.25),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.07);
   color: white;
 }
 .island .title { font-weight: 700; font-size: 15px; }
@@ -89,7 +96,7 @@ window.discbay-island { background: transparent; }
 .island button.pill:hover { background: rgba(255, 255, 255, 0.2); }
 .island button.pill.primary { background: rgba(255, 255, 255, 0.94); color: #0c0c10; }
 .island button.pill.primary:hover { background: #ffffff; }
-"""
+""" % (PILL_MARGIN_TOP, PILL_MARGIN_SIDE, PILL_MARGIN_BOTTOM, PILL_MARGIN_SIDE))
 
 
 # ---------------------------------------------------------------------------- sound
@@ -289,6 +296,138 @@ class DiscWidget(Gtk.DrawingArea):
         cr.restore()
 
 
+# ---------------------------------------------------------------------------- panels (KDE)
+ISLAND_BUS = "me.jolen.DiscBay1.Island"
+ISLAND_PATH = "/me/jolen/DiscBay1/Island"
+ISLAND_IFACE = "me.jolen.DiscBay1.Island"
+ISLAND_XML = f"""
+<node>
+  <interface name="{ISLAND_IFACE}">
+    <method name="Panels"><arg type="s" name="report" direction="in"/></method>
+  </interface>
+</node>
+"""
+KWIN_SCRIPT_NAME = "discbay-island-panels"
+
+# Runs inside KWin, which knows where every panel is right now: whether an
+# auto-hiding panel is out or tucked away, and whether a fullscreen window is
+# covering it. It reports the visible top panels to the island whenever that
+# might have changed.
+KWIN_SCRIPT = """
+var BUS = "%(bus)s", PATH = "%(path)s", IFACE = "%(iface)s";
+function report() {
+    var active = workspace.activeWindow;
+    var covered = {};
+    // A focused fullscreen window sits above the panels on its screen.
+    if (active && active.fullScreen && !active.minimized && active.output)
+        covered[active.output.name] = true;
+    var panels = [];
+    var wins = workspace.windowList();
+    for (var i = 0; i < wins.length; i++) {
+        var w = wins[i];
+        if (!w.dock || w.hidden || w.minimized || !w.output || covered[w.output.name])
+            continue;
+        var o = w.output.geometry, g = w.frameGeometry;
+        if (g.width < g.height)
+            continue;                                   // a vertical panel
+        var bottom = g.y + g.height - o.y;
+        if (g.y - o.y > g.height || bottom <= 1)
+            continue;                                   // not at the top, or slid away
+        panels.push({output: w.output.name, bottom: Math.round(bottom)});
+    }
+    var screen = workspace.activeScreen ? workspace.activeScreen.name : "";
+    callDBus(BUS, PATH, IFACE, "Panels", JSON.stringify({active: screen, panels: panels}));
+}
+function watch(w) {
+    var names = ["fullScreenChanged", "minimizedChanged", "outputChanged", "hiddenChanged"];
+    if (w.dock)
+        names.push("frameGeometryChanged");
+    for (var i = 0; i < names.length; i++)
+        if (w[names[i]])
+            w[names[i]].connect(report);
+}
+var all = workspace.windowList();
+for (var i = 0; i < all.length; i++)
+    watch(all[i]);
+workspace.windowAdded.connect(function (w) { watch(w); report(); });
+workspace.windowRemoved.connect(report);
+workspace.windowActivated.connect(report);
+if (workspace.screensChanged)
+    workspace.screensChanged.connect(report);
+report();
+""" % {"bus": ISLAND_BUS, "path": ISLAND_PATH, "iface": ISLAND_IFACE}
+
+
+def panel_bottom(report: dict, output: str | None) -> int:
+    """How far down a visible top panel reaches on this output (0 if none)."""
+    return max((int(p.get("bottom", 0)) for p in report.get("panels", [])
+                if output is None or p.get("output") == output), default=0)
+
+
+class KWinPanels:
+    """Keeps a live picture of KDE's top panels, from a small KWin script.
+
+    ``report`` is None until KWin has answered (or if this isn't KDE).
+    """
+
+    def __init__(self, bus: Gio.DBusConnection, on_change: Callable[[], None]):
+        self.bus = bus
+        self.on_change = on_change
+        self.report: dict | None = None
+        node = Gio.DBusNodeInfo.new_for_xml(ISLAND_XML)
+        try:
+            bus.register_object(ISLAND_PATH, node.interfaces[0], self._on_call, None, None)
+        except GLib.Error as exc:
+            print(f"discbay-island: can't listen for panel updates: {exc.message}", file=sys.stderr)
+            return
+        Gio.bus_own_name_on_connection(bus, ISLAND_BUS, Gio.BusNameOwnerFlags.REPLACE,
+                                       lambda *_: self._load(), None)
+
+    def _on_call(self, conn, sender, path, iface, method, params, invocation):
+        try:
+            self.report = json.loads(params.unpack()[0])
+        except (ValueError, TypeError):
+            pass
+        invocation.return_value(None)
+        self.on_change()
+
+    def _kwin(self, path: str, iface: str, method: str, args=None, reply=None):
+        return self.bus.call_sync("org.kde.KWin", path, iface, method, args,
+                                  GLib.VariantType(reply) if reply else None,
+                                  Gio.DBusCallFlags.NO_AUTO_START, 2000, None)
+
+    def _load(self) -> None:
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or GLib.get_user_cache_dir()
+        path = os.path.join(runtime, KWIN_SCRIPT_NAME + ".js")
+        try:
+            with open(path, "w") as f:
+                f.write(KWIN_SCRIPT)
+            name = GLib.Variant("(s)", (KWIN_SCRIPT_NAME,))
+            # A copy left over from an earlier run of the island would report twice.
+            self._kwin("/Scripting", "org.kde.kwin.Scripting", "unloadScript", name, "(b)")
+            script_id = self._kwin("/Scripting", "org.kde.kwin.Scripting", "loadScript",
+                                   GLib.Variant("(ss)", (path, KWIN_SCRIPT_NAME)), "(i)").unpack()[0]
+            if script_id < 0:
+                raise GLib.Error("KWin refused the script")
+            self._kwin(f"/Scripting/Script{script_id}", "org.kde.kwin.Script", "run")
+        except (GLib.Error, OSError):
+            self.report = None   # not KDE (or KWin scripting is off): the fallbacks apply
+
+    def unload(self) -> None:
+        try:
+            self._kwin("/Scripting", "org.kde.kwin.Scripting", "unloadScript",
+                       GLib.Variant("(s)", (KWIN_SCRIPT_NAME,)), "(b)")
+        except GLib.Error:
+            pass
+
+    def active_output(self) -> str | None:
+        """The screen you're working on right now (follows the mouse or focus, per KDE's setting)."""
+        try:
+            return self._kwin("/KWin", "org.kde.KWin", "activeOutputName", None, "(s)").unpack()[0] or None
+        except GLib.Error:
+            return (self.report or {}).get("active") or None
+
+
 # ---------------------------------------------------------------------------- the island
 class Island(Gtk.ApplicationWindow):
     # How long the island lingers on transient states before retracting (seconds).
@@ -317,8 +456,12 @@ class Island(Gtk.ApplicationWindow):
             # the panel is resized, moved or hidden. -1 would float over panels.
             self.over_panels = os.environ.get("DISCBAY_ISLAND_OVER_PANELS", "") not in ("", "0")
             LayerShell.set_exclusive_zone(self, -1 if self.over_panels else 0)
-        self.panel_offset = 0   # px to clear top panels we place ourselves (Plasma)
+        self.panel_offset = 0      # px to clear top panels, when we place ourselves (KDE)
+        self.offset_now = 0.0      # eases towards panel_offset so the island glides
         self.plasma = False
+        self.kwin: KWinPanels | None = None
+        self.output: str | None = None   # the screen the island is on, when we chose it
+        self._input_box = None
 
         self._build()
 
@@ -367,6 +510,8 @@ class Island(Gtk.ApplicationWindow):
     # ------------------------------------------------------------- daemon
     def connect_daemon(self, bus: Gio.DBusConnection) -> None:
         self.bus = bus
+        if self.layer and not self.over_panels:
+            self.kwin = KWinPanels(bus, self._panels_changed)
         bus.signal_subscribe(None, INTERFACE, "StateChanged", OBJECT_PATH, None,
                              Gio.DBusSignalFlags.NONE, self._on_signal)
         Gio.bus_watch_name_on_connection(bus, BUS_NAME, Gio.BusNameWatcherFlags.NONE,
@@ -523,14 +668,18 @@ class Island(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------- show/hide
     def _measure_panels(self) -> None:
-        """Find top panels on Plasma and drop below them.
+        """Find top panels on KDE and drop below them.
 
         Exclusive zone 0 only avoids panels that reserve space ("Always
         visible"); a Plasma panel set to dodge windows, or to let windows go
-        over or under it, reserves nothing but still sits on screen. So on
-        Plasma we ask the shell where its panels are and place ourselves.
+        over or under it, reserves nothing but still sits on screen. So on KDE
+        we place ourselves: from KWin's live report when we have it (which
+        knows when a panel has hidden), otherwise from plasmashell's list.
         """
         if not self.layer or self.over_panels or self.bus is None:
+            return
+        if self.kwin is not None and self.kwin.report is not None:
+            self._place_on_active_output()
             return
         try:
             reply = self.bus.call_sync("org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell",
@@ -546,9 +695,39 @@ class Island(Gtk.ApplicationWindow):
             LayerShell.set_exclusive_zone(self, -1)   # we measure from the very top ourselves
         self.panel_offset = top_panel_offset(reply.unpack()[0])
 
+    def _place_on_active_output(self) -> None:
+        """Open on the screen you're using, below that screen's panels only."""
+        name = self.kwin.active_output()
+        monitor = None
+        if name:
+            monitors = Gdk.Display.get_default().get_monitors()
+            for i in range(monitors.get_n_items()):
+                if monitors.get_item(i).get_connector() == name:
+                    monitor = monitors.get_item(i)
+        try:
+            LayerShell.set_monitor(self, monitor)
+        except TypeError:   # older bindings won't take None: leave the choice to KWin
+            monitor = None
+        self.output = name if monitor is not None else None
+        if not self.plasma:
+            self.plasma = True
+            LayerShell.set_exclusive_zone(self, -1)   # we measure from the very top ourselves
+        self.panel_offset = panel_bottom(self.kwin.report, self.output)
+        self.offset_now = float(self.panel_offset)
+
+    def _panels_changed(self) -> None:
+        """KWin says a panel moved, hid or came back: glide to the new spot."""
+        if self.kwin is None or self.kwin.report is None or self.over_panels:
+            return
+        if not self.plasma:
+            self.plasma = True
+            LayerShell.set_exclusive_zone(self, -1)
+        self.panel_offset = panel_bottom(self.kwin.report, self.output)
+
     def reveal(self) -> None:
         if not self.get_visible():
             self._measure_panels()
+            self.offset_now = float(self.panel_offset)
             self.shown = 0.0
             self._apply_offset()
             self.present()
@@ -575,17 +754,40 @@ class Island(Gtk.ApplicationWindow):
             self._hide_timer = 0
 
     def _apply_offset(self) -> None:
-        height = max(self.pill.get_height(), 64) + 30
+        height = max(self.pill.get_height(), 64) + PILL_MARGIN_TOP + PILL_MARGIN_BOTTOM
         if self.layer:
             # Slide the whole surface from above the screen edge into place.
-            rest = self.panel_offset + TOP_MARGIN
+            rest = self.offset_now + TOP_MARGIN
             LayerShell.set_margin(self, LayerShell.Edge.TOP, int(-height + (height + rest) * self.shown))
         # Without layer-shell we can't move the window, so the island just fades.
         self.pill.set_opacity(max(0.0, min(1.0, self.shown * 1.6)))
 
+    def _update_input_region(self) -> None:
+        """Only the pill takes clicks; the shadow margin around it lets them through."""
+        surface = self.get_surface()
+        ok, bounds = self.pill.compute_bounds(self)
+        if surface is None or not ok:
+            return
+        box = (int(bounds.get_x()), int(bounds.get_y()),
+               int(bounds.get_width()), int(bounds.get_height()))
+        key = box + (self.get_width(), self.get_height())   # GTK may reset it when resizing
+        if key != self._input_box:
+            self._input_box = key
+            surface.set_input_region(cairo.Region(cairo.RectangleInt(*box)))
+
     def _on_frame(self, widget, clock):
         now = time.monotonic()
         dt, self._last_frame = min(0.05, now - self._last_frame), now
+
+        if abs(self.offset_now - self.panel_offset) > 0.5:
+            self.offset_now += (self.panel_offset - self.offset_now) * min(1.0, dt * 12.0)
+            if self._anim is None:
+                self._apply_offset()
+        elif self.offset_now != self.panel_offset:
+            self.offset_now = float(self.panel_offset)
+            if self._anim is None:
+                self._apply_offset()
+        self._update_input_region()
 
         if self._anim is not None:
             start_val, end_val, t0, dur, kind = self._anim
@@ -630,6 +832,19 @@ class App(Gtk.Application):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.hold()  # stay alive while the island is hidden
+        # systemd stops us with SIGTERM: quit properly so the KWin script is unloaded.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self._quit)
+
+    def _quit(self):
+        self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def do_shutdown(self):
+        island = getattr(self, "island", None)
+        if island is not None and island.kwin is not None:
+            island.kwin.unload()
+        Gtk.Application.do_shutdown(self)
 
     def do_activate(self):
         if getattr(self, "island", None):
