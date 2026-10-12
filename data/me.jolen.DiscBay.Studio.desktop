@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DiscBay Studio
+GenericName=Disc maker
+Comment=Make and print launcher discs for your games and apps
+Icon=me.jolen.DiscBay
+Exec=xdg-open http://localhost:8404
+Terminal=false
+Categories=Utility;
+Keywords=cd;disc;launcher;burn;label;steam;
+StartupNotify=false

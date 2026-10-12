@@ -70,10 +70,11 @@ In a clear slim case, the disc is the cover.
 <br>
 
 ```sh
-sudo dnf install python3-gobject gtk4 gtk4-layer-shell python3-flask xorriso
-git clone https://github.com/jolenjolen/discbay.git
-cd discbay && ./install.sh
+sudo dnf copr enable jolenjolen/discbay
+sudo dnf install discbay
 ```
+
+Log out and back in, and DiscBay is running.
 
 <br>
 </details>
@@ -83,9 +84,9 @@ cd discbay && ./install.sh
 <br>
 
 Not packaged yet. DiscBay needs Python 3.11+, PyGObject, GTK 4 with
-gtk4-layer-shell, Flask and xorriso, then `./install.sh`. If you get it
-running on your distro, open an issue with the package names so it can get
-its own section here.
+gtk4-layer-shell, Flask and xorriso. Install those, then clone this
+repository and run `./install.sh`. If you get it running on your distro,
+open an issue with the package names so it can get its own section here.
 
 <br>
 </details>

@@ -1,11 +1,12 @@
 [Unit]
 Description=DiscBay notification island (GTK4 frontend)
+Documentation=https://github.com/jolenjolen/discbay
 PartOf=graphical-session.target
 After=graphical-session.target discbayd.service
 Wants=discbayd.service
 
 [Service]
-ExecStart=/usr/bin/python3 %h/.local/bin/discbay-island
+ExecStart=/usr/bin/discbay-island
 Restart=on-failure
 RestartSec=2
 

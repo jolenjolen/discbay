@@ -1,50 +1,93 @@
-# DiscBay
+# DiscBay guide
 
-**Console-style disc launching for Linux.** Slide a CD into the drive, hear the
-chirp as it spins up, and a notification island swooshes down from the top of
-the screen with the disc's name and a short countdown. Let it run and your
-game or app starts. Cancel it and nothing happens. Pull the disc out and,
-if you like, the app closes, just like a cartridge.
+Everything the README leaves out. New here? Start with the
+[README](../README.md), then come back when you want the details.
 
-The discs don't hold the software. A disc carries a tiny `discbay.toml`
-manifest (its name, colour, cover art and which installed app to open), or
-just a volume label you map to an app yourself. Any app works: native apps,
-Flatpaks, AppImages, Steam games, emulators, URLs, folders.
+- [What gets installed](#what-gets-installed)
+- [Installing from source](#installing-from-source)
+- [Building the RPM](#building-the-rpm)
+- [DiscBay Studio](#discbay-studio)
+- [Labels](#labels)
+- [Making discs from the command line](#making-discs-from-the-command-line)
+- [Trust](#trust)
+- [Discs you already own](#discs-you-already-own)
+- [Changing a disc you've already burned](#changing-a-disc-youve-already-burned)
+- [Commands](#commands)
+- [How it works](#how-it-works)
+- [Developing without a drive](#developing-without-a-drive)
+- [Writing a frontend](#writing-a-frontend)
 
-## How it works
+## What gets installed
 
+Three services run for each user. The RPM switches them on for everyone,
+starting at your next login (or right away with
+`systemctl --user start discbayd discbay-island discbay-studio`):
+
+| Service | What it does |
+|---|---|
+| `discbayd` | Watches the drive, runs the countdown, launches and closes apps |
+| `discbay-island` | The notification island at the top of the screen |
+| `discbay-studio` | The disc maker at http://localhost:8404 |
+
+Your settings live in `~/.config/discbay/discs.toml` and trusted discs in
+`~/.local/state/discbay`. Updates and uninstalls never touch them. To turn
+one service off just for you, for example Studio:
+`systemctl --user disable --now discbay-studio`. DiscBay Studio is also in
+your app menu.
+
+The island uses the layer-shell protocol, which KDE Plasma, Sway, Hyprland
+and COSMIC support. On other desktops it falls back to a plain window.
+It drops in just below a top panel rather than over it. On Plasma it asks
+the shell where its panels are each time it appears, so it also clears panels
+set to dodge windows or let windows go over them (which reserve no space);
+on other desktops it keeps clear of any panel that reserves space. To have it float over panels instead,
+run `systemctl --user edit discbay-island` and add:
+
+```ini
+[Service]
+Environment=DISCBAY_ISLAND_OVER_PANELS=1
 ```
- optical drive ──ioctl──▶  discbayd  ──D-Bus / JSON──▶  any frontend
-   (/dev/sr0)          state machine,                 GTK4 island, GNOME,
-                       countdown, launch             Gamescope, widgets…
-```
 
-- The daemon asks the kernel for the drive status directly. Drives report
-  "not ready" while a fresh disc spins up, so DiscBay knows a disc is there
-  **before any data can be read**. That's when the chirp plays.
-- Once the drive is ready, the ISO 9660 label, the manifest and the cover art
-  are read straight off the raw device. No mounting.
-- The daemon owns all logic (countdown included). Frontends only draw, so
-  you can write one for your desktop without touching the core. See
-  [docs/PROTOCOL.md](docs/PROTOCOL.md).
+KDE's own removable-device notifier also reacts to discs. You may want to
+turn off its pop-up and automounting for the optical drive.
 
-## Install (Fedora)
+## Installing from source
+
+Without the RPM, for example while hacking on DiscBay or on another distro:
 
 ```sh
 sudo dnf install python3-gobject gtk4 gtk4-layer-shell python3-flask xorriso
 git clone https://github.com/jolenjolen/discbay.git
-cd discbay
-./install.sh
+cd discbay && ./install.sh
 ```
 
-Run `./install.sh` again after `git pull` to update; it restarts the services for you.
+`install.sh` installs into your home folder without root. Run it again after
+`git pull` to update; it restarts the services for you. To switch to the RPM
+later, remove this install first with `./install.sh --uninstall`, because
+its services would otherwise take priority over the RPM's.
 
-This starts three user services: `discbayd` (the daemon), `discbay-island`
-(the notification island) and `discbay-studio` (the disc maker below).
+## Building the RPM
+
+```sh
+sudo dnf install rpm-build python3-devel pyproject-rpm-macros systemd-rpm-macros \
+  desktop-file-utils python3-gobject python3-flask xorriso
+packaging/build-rpm.sh
+sudo dnf install dist/discbay-*.noarch.rpm
+```
+
+The build runs the test suite. `packaging/build-rpm.sh --srpm` makes just
+the source RPM. Bump the version in both `pyproject.toml` and
+`packaging/discbay.spec` (the script checks they match), and add a
+`%changelog` entry.
+
+The packages on COPR are built from this repository by
+[`.copr/Makefile`](../.copr/Makefile): in the COPR project, the package's
+source is the GitHub repository with the *make srpm* build method, and the
+GitHub webhook rebuilds it on every push.
 
 ## DiscBay Studio
 
-Open **http://localhost:8404** to make discs without the command line:
+Open **http://localhost:8404**:
 
 - pick an installed app from a grid with its icon, a Steam game with its
   cover art, an AppImage, or anything else (a program file, a website or
@@ -55,11 +98,16 @@ Open **http://localhost:8404** to make discs without the command line:
 - see the disc and its island exactly as they'll appear, then burn with
   live progress, or save a disc image instead
 
-### Labels
+While Studio is open, inserted discs don't autostart, so you can put in the
+disc you want to rewrite. Studio only listens on this computer and refuses
+requests from other websites. Change the port with `DISCBAY_STUDIO_PORT` in
+`~/.config/systemd/user/discbay-studio.service`.
+
+## Labels
 
 **Print labels** in Studio prints the disc face and a case spine on
 [Label Planet LPCD118P](https://www.labelplanet.co.uk/label-finder/lpcd118p/)
-sheets (A4, two 118 mm disc labels with 41 mm holes, plus spine strips).
+sheets: A4, two 118 mm disc labels with 41 mm holes, plus spine strips.
 Choose the top or bottom labels so half-used sheets aren't wasted. A slim
 clear jewel case shows the printed disc through the lid, and the 6.5 mm
 strip folds around the case's 5 mm edge.
@@ -69,22 +117,9 @@ and hold it over a sheet against a window. If it's off, nudge it in the
 Alignment section; Studio remembers the setting. Print at A4, 100% (actual
 size), with no margins.
 
-While Studio is open, inserted discs don't autostart, so you can put in the
-disc you want to rewrite. Studio only listens on this computer and refuses
-requests from other websites. Change the port with `DISCBAY_STUDIO_PORT` in
-`~/.config/systemd/user/discbay-studio.service`.
-
-The bundled island frontend uses the layer-shell protocol, which KDE Plasma,
-Sway, Hyprland and COSMIC support. On other desktops it falls back to a plain
-window.
-
-**Tip:** KDE's own removable-device notifier will also react to discs. You may
-want to turn off its pop-up and automounting for the optical drive.
-
-## Making a disc
+## Making discs from the command line
 
 ```sh
-sudo dnf install xorriso
 discbay-ctl burn --label KRITA_01 --name "Krita" --color "#3daee9" \
     --art cover.png --app org.kde.krita --close-on-eject
 ```
@@ -92,13 +127,12 @@ discbay-ctl burn --label KRITA_01 --name "Krita" --color "#3daee9" \
 **Discs stay rewritable.** `burn` leaves the disc open, so running it again
 on the same disc (with different options) replaces what it launches, even on
 a write-once CD-R. Each rewrite adds a new session that costs about 13 MB, so
-a 700 MB CD-R allows roughly 40-50 rewrites; `burn` tells you how many are
+a 700 MB CD-R allows roughly 40 to 50 rewrites; `burn` tells you how many are
 left. Add `--final` to close a disc for good. If xorriso hits any problem,
 it stops before writing, so a mistake never wastes a session.
 
 Prefer an image file? `discbay-ctl make-disc` takes the same options and
-writes an `.iso`. Note that burning that with `xorriso -as cdrecord` closes
-the disc.
+writes an `.iso`. Burning that with `xorriso -as cdrecord` closes the disc.
 
 Pick one launch target:
 
@@ -113,7 +147,7 @@ Pick one launch target:
 Find desktop IDs with `ls /usr/share/applications` or
 `flatpak list --app --columns=application`.
 
-### Trust
+## Trust
 
 DiscBay never runs software stored on a disc; discs only point at apps that
 are already installed. Even so, a disc made by someone else could point at
@@ -124,19 +158,19 @@ changes, it asks again. Manage it with `discbay-ctl trusted` and
 `discbay-ctl untrust <fingerprint>`, or change the policy with
 `disc_manifests` in `discs.toml`.
 
-### Discs you already own
+## Discs you already own
 
 An old CD with no manifest can be mapped by its label instead. Run
 `discbay-ctl probe` with it inserted, then add an entry to
-`~/.config/discbay/discs.toml` (see [examples/discs.toml](examples/discs.toml))
+`~/.config/discbay/discs.toml` (see [examples/discs.toml](../examples/discs.toml))
 and run `discbay-ctl reload`.
 
-### Changing a disc you've already burned
+## Changing a disc you've already burned
 
 To change a disc everywhere, run `burn` on it again. To change a closed disc,
-or just on this computer, you don't need to burn at all.
-Add an entry with the disc's label to `discs.toml` containing only what you
-want to change, and run `discbay-ctl reload`:
+or just on this computer, you don't need to burn at all. Add an entry with
+the disc's label to `discs.toml` containing only what you want to change,
+and run `discbay-ctl reload`:
 
 ```toml
 [discs.OPENTTD]
@@ -158,6 +192,36 @@ discbay-ctl make-disc ...   # build a launcher ISO file instead
 discbay-ctl trusted         # list trusted discs; untrust FINGERPRINT to forget one
 ```
 
+## How it works
+
+```
+ optical drive ──ioctl──▶  discbayd  ──D-Bus / JSON──▶  any frontend
+   (/dev/sr0)          state machine,                 GTK4 island, GNOME,
+                       countdown, launch             Gamescope, widgets…
+```
+
+- The daemon asks the kernel for the drive status directly. Drives report
+  "not ready" while a fresh disc spins up, so DiscBay knows a disc is there
+  **before any data can be read**. That's when the chirp plays.
+- Once the drive is ready, the label, the manifest and the cover art are read
+  straight off the raw device, from the newest session on rewritten discs.
+  No mounting.
+- The daemon owns all logic, the countdown included. Frontends only draw, so
+  you can write one for your desktop without touching the core.
+- The daemon starts at login, before your desktop is up. Apps it launches get
+  the desktop's environment (`WAYLAND_DISPLAY`, `DISPLAY` and the rest, as
+  `systemctl --user show-environment` reports them), and a disc that's in the
+  drive at boot waits for the desktop before its countdown starts.
+
+## When an app doesn't start
+
+If the island says **Closed straight away**, the app quit with an error
+within a few seconds of starting. Its own output is in the daemon's log:
+
+```sh
+journalctl --user -u discbayd -n 50
+```
+
 ## Developing without a drive
 
 ```sh
@@ -168,20 +232,15 @@ discbay-ctl sim insert --iso krita_01.iso  # a disc image, manifest and art incl
 discbay-ctl sim remove
 ```
 
-Run the tests with `python3 -m unittest discover -s tests`.
+Run the tests with `python3 -m unittest discover -s tests`. The README's
+hero animation is generated by `docs/media/make_hero.py`.
 
 ## Writing a frontend
 
-Frontends live in `frontends/<name>/`. Read [docs/PROTOCOL.md](docs/PROTOCOL.md):
+Frontends live in `frontends/<name>/`. Read [PROTOCOL.md](PROTOCOL.md):
 subscribe to one D-Bus signal (or read `discbay-ctl watch`), draw the
-`state`, play sounds on `event`, and call `Cancel` / `LaunchNow` / `Trust`. Pull
-requests for new desktops are very welcome.
+`state`, play sounds on `event`, and call `Cancel`, `LaunchNow` or `Trust`.
+Pull requests for new desktops are very welcome.
 
-## Status
-
-Early prototype. Planned: gamepad controls on the island, audio-CD
-identification by table of contents, a Gamescope (SteamOS gaming mode) frontend.
-
-## Licence
-
-DiscBay is free software, released under the [GNU General Public License v3.0 or later](LICENSE).
+Planned: gamepad controls on the island, identifying audio CDs by their
+track list, and a Gamescope (SteamOS gaming mode) frontend.

@@ -3,7 +3,7 @@ Description=DiscBay disc launcher daemon
 Documentation=https://github.com/jolenjolen/discbay
 
 [Service]
-ExecStart=%h/.local/bin/discbayd
+ExecStart=/usr/bin/discbayd
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2

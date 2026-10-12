@@ -24,3 +24,37 @@ jobs:
         run: |
           node --check discbay/studio_static/studio.js
           node --check discbay/studio_static/labels.js
+
+  rpm:
+    # Build the RPM with Fedora's real packaging macros, install it, and check
+    # that the services are switched on for users out of the box.
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install build tools
+        run: |
+          dnf -y install git rpm-build python3-devel pyproject-rpm-macros systemd-rpm-macros \
+            desktop-file-utils python3-gobject python3-flask xorriso rpmlint
+      - uses: actions/checkout@v4
+      - name: Build the RPM
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash packaging/build-rpm.sh
+      - name: Install it
+        run: dnf -y install dist/discbay-*.noarch.rpm
+      - name: Check the installed package
+        run: |
+          discbay-ctl --help > /dev/null
+          discbayd --help > /dev/null
+          discbay-studio --help > /dev/null
+          python3 -c "import discbay.studio as s; assert (s.STATIC / 'index.html').is_file()"
+          test -f /usr/lib/systemd/user/discbayd.service
+          test -x /usr/bin/discbay-island
+          # The preset should have enabled the services for every user.
+          systemctl --global is-enabled discbayd.service discbay-island.service discbay-studio.service
+      - name: Lint (advisory)
+        run: rpmlint dist/*.rpm || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: discbay-rpm
+          path: dist/*.rpm

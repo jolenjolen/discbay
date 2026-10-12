@@ -1,0 +1,5 @@
+# DiscBay's services run for every user once the package is installed.
+# Turn one off for yourself with: systemctl --user disable --now discbay-studio.service
+enable discbayd.service
+enable discbay-island.service
+enable discbay-studio.service
