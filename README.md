@@ -70,7 +70,7 @@ In a clear slim case, the disc is the cover.
 <br>
 
 ```sh
-sudo dnf copr enable jolenjolen/discbay
+sudo dnf copr enable jolen/discbay
 sudo dnf install discbay
 ```
 
