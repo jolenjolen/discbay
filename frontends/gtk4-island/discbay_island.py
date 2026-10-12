@@ -146,6 +146,50 @@ def parse_hex(color: str | None) -> tuple[float, float, float]:
 
 
 # ---------------------------------------------------------------------------- the disc
+# Plasma's scripting API: one line per panel, "location,height,hiding,floating".
+PLASMA_PANEL_SCRIPT = (
+    "var o=[];panels().forEach(function(p){"
+    "o.push([p.location,p.height,p.hiding,p.floating?1:0].join(','))});print(o.join('\\n'));"
+)
+PLASMA_FLOAT_GAP = 8  # a floating Plasma panel hovers this far from the screen edge
+
+
+def top_panel_offset(report: str) -> int:
+    """How far down the island must sit to clear Plasma's top panels."""
+    offset = 0
+    for line in report.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) < 4 or parts[0] != "top":
+            continue
+        try:
+            height = int(float(parts[1]))
+        except ValueError:
+            continue
+        if parts[2] == "autohide":
+            continue   # tucked away until you hover: nothing to avoid
+        offset = max(offset, height + (PLASMA_FLOAT_GAP if parts[3] == "1" else 0))
+    return offset
+
+
+def pixbuf_to_surface(pixbuf: GdkPixbuf.Pixbuf) -> cairo.ImageSurface:
+    """A cairo copy of a pixbuf (Gdk.cairo_set_source_pixbuf is deprecated)."""
+    if not pixbuf.get_has_alpha():
+        pixbuf = pixbuf.add_alpha(False, 0, 0, 0)
+    w, h, rowstride = pixbuf.get_width(), pixbuf.get_height(), pixbuf.get_rowstride()
+    src = pixbuf.get_pixels()
+    stride = cairo.ImageSurface.format_stride_for_width(cairo.FORMAT_ARGB32, w)
+    out = bytearray(stride * h)
+    little = sys.byteorder == "little"
+    for y in range(h):
+        row = src[y * rowstride: y * rowstride + w * 4]
+        o = y * stride
+        for x in range(0, w * 4, 4):
+            r, g, b, a = row[x], row[x + 1], row[x + 2], row[x + 3]
+            r, g, b = r * a // 255, g * a // 255, b * a // 255   # cairo wants premultiplied
+            out[o + x: o + x + 4] = bytes((b, g, r, a) if little else (a, r, g, b))
+    return cairo.ImageSurface.create_for_data(out, cairo.FORMAT_ARGB32, w, h, stride)
+
+
 class DiscWidget(Gtk.DrawingArea):
     SIZE = 46
 
@@ -155,7 +199,7 @@ class DiscWidget(Gtk.DrawingArea):
         self.set_content_height(self.SIZE)
         self.set_valign(Gtk.Align.CENTER)
         self.color = parse_hex(None)
-        self.pixbuf: GdkPixbuf.Pixbuf | None = None
+        self.art: cairo.ImageSurface | None = None
         self._art_path: str | None = None
         self.angle = 0.0
         self.speed = 0.0          # radians per second
@@ -167,12 +211,13 @@ class DiscWidget(Gtk.DrawingArea):
         self.color = parse_hex(color)
         if art != self._art_path:
             self._art_path = art
-            self.pixbuf = None
+            self.art = None
             if art and os.path.exists(art):
                 try:
-                    self.pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(art, 96, 96, True)
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(art, 96, 96, True)
+                    self.art = pixbuf_to_surface(pixbuf)
                 except GLib.Error:
-                    self.pixbuf = None
+                    self.art = None
 
     def advance(self, dt: float) -> None:
         # Ease towards the target speed so spin-up and slow-down feel physical.
@@ -208,12 +253,11 @@ class DiscWidget(Gtk.DrawingArea):
         cr.arc(0, 0, hole, 0, 2 * math.pi)
         cr.clip()
 
-        if self.pixbuf is not None:
-            scale = (2 * r) / min(self.pixbuf.get_width(), self.pixbuf.get_height())
+        if self.art is not None:
+            scale = (2 * r) / min(self.art.get_width(), self.art.get_height())
             cr.save()
             cr.scale(scale, scale)
-            Gdk.cairo_set_source_pixbuf(cr, self.pixbuf,
-                                        -self.pixbuf.get_width() / 2, -self.pixbuf.get_height() / 2)
+            cr.set_source_surface(self.art, -self.art.get_width() / 2, -self.art.get_height() / 2)
             cr.paint()
             cr.restore()
         else:
@@ -258,6 +302,8 @@ class Island(Gtk.ApplicationWindow):
         self.set_resizable(False)
         self.set_title("DiscBay")
 
+        self.over_panels = False
+        self.bus: Gio.DBusConnection | None = None
         self.layer = bool(LayerShell and getattr(LayerShell, "is_supported", lambda: True)())
         if self.layer:
             LayerShell.init_for_window(self)
@@ -265,7 +311,14 @@ class Island(Gtk.ApplicationWindow):
             LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND)
-            LayerShell.set_exclusive_zone(self, -1)  # float over panels and fullscreen apps
+            # Exclusive zone 0 asks the compositor to place us clear of anything
+            # that reserves screen space (a top panel, a dock): the island drops
+            # in just below it instead of covering it, and moves by itself if
+            # the panel is resized, moved or hidden. -1 would float over panels.
+            self.over_panels = os.environ.get("DISCBAY_ISLAND_OVER_PANELS", "") not in ("", "0")
+            LayerShell.set_exclusive_zone(self, -1 if self.over_panels else 0)
+        self.panel_offset = 0   # px to clear top panels we place ourselves (Plasma)
+        self.plasma = False
 
         self._build()
 
@@ -469,8 +522,33 @@ class Island(Gtk.ApplicationWindow):
             self.sub.set_label(f"Inserted · starting in {whole}")
 
     # ------------------------------------------------------------- show/hide
+    def _measure_panels(self) -> None:
+        """Find top panels on Plasma and drop below them.
+
+        Exclusive zone 0 only avoids panels that reserve space ("Always
+        visible"); a Plasma panel set to dodge windows, or to let windows go
+        over or under it, reserves nothing but still sits on screen. So on
+        Plasma we ask the shell where its panels are and place ourselves.
+        """
+        if not self.layer or self.over_panels or self.bus is None:
+            return
+        try:
+            reply = self.bus.call_sync("org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell",
+                                       "evaluateScript", GLib.Variant("(s)", (PLASMA_PANEL_SCRIPT,)),
+                                       GLib.VariantType("(s)"), Gio.DBusCallFlags.NO_AUTO_START, 500, None)
+        except GLib.Error:
+            if self.plasma:   # plasmashell went away: fall back to the compositor's placement
+                self.plasma, self.panel_offset = False, 0
+                LayerShell.set_exclusive_zone(self, 0)
+            return
+        if not self.plasma:
+            self.plasma = True
+            LayerShell.set_exclusive_zone(self, -1)   # we measure from the very top ourselves
+        self.panel_offset = top_panel_offset(reply.unpack()[0])
+
     def reveal(self) -> None:
         if not self.get_visible():
+            self._measure_panels()
             self.shown = 0.0
             self._apply_offset()
             self.present()
@@ -500,7 +578,8 @@ class Island(Gtk.ApplicationWindow):
         height = max(self.pill.get_height(), 64) + 30
         if self.layer:
             # Slide the whole surface from above the screen edge into place.
-            LayerShell.set_margin(self, LayerShell.Edge.TOP, int(-height + (height + TOP_MARGIN) * self.shown))
+            rest = self.panel_offset + TOP_MARGIN
+            LayerShell.set_margin(self, LayerShell.Edge.TOP, int(-height + (height + rest) * self.shown))
         # Without layer-shell we can't move the window, so the island just fades.
         self.pill.set_opacity(max(0.0, min(1.0, self.shown * 1.6)))
 

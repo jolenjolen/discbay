@@ -606,3 +606,100 @@ class MultisessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DesktopSessionTests(unittest.TestCase):
+    """The daemon starts at login, before the desktop: see discbay/session.py."""
+
+    def make_without_desktop(self):
+        engine, clock, launcher, events = make()
+        launcher.ready = False
+        launcher.session_ready = lambda: launcher.ready
+        return engine, clock, launcher, events
+
+    def test_disc_in_at_boot_waits_for_the_desktop_then_counts_down(self):
+        engine, clock, launcher, events = self.make_without_desktop()
+        insert(engine, "HOLLOW_01")
+        self.assertEqual(events[-1]["state"], P.IDLE)
+        self.assertEqual(events[-1]["message"], Engine.WAITING)
+        clock.t += 60
+        engine.tick()
+        self.assertEqual(launcher.started, [])
+        launcher.ready = True
+        engine.tick()                        # desktop appears...
+        self.assertEqual(engine.state, P.IDLE)
+        clock.t += Engine.SESSION_SETTLE
+        engine.tick()                        # ...and the island has had time to come up
+        self.assertEqual(events[-1]["state"], P.COUNTDOWN)
+        self.assertEqual(events[-1]["event"], P.EV_IDENTIFIED)
+        clock.t += 5
+        engine.tick()
+        self.assertEqual(len(launcher.started), 1)
+
+    def test_start_without_a_desktop_is_an_error_not_a_silent_exit(self):
+        engine, clock, launcher, events = self.make_without_desktop()
+        insert(engine, "MANUAL")
+        self.assertTrue(engine.launch_now())
+        self.assertEqual(events[-1]["state"], P.ERROR)
+        self.assertEqual(launcher.started, [])
+
+    def test_app_that_dies_straight_away_is_reported(self):
+        engine, clock, launcher, events = make()
+        insert(engine, "EDITOR")
+        clock.t += 5
+        engine.tick()
+        proc = launcher.started[0][1]
+        clock.t += 0.3
+        proc.code = 1
+        engine.tick()
+        self.assertEqual(events[-1]["event"], P.EV_FAILED)
+        self.assertEqual(events[-1]["state"], P.ERROR)
+        self.assertIn("exit code 1", events[-1]["message"])
+        self.assertTrue(events[-1]["can_launch"])   # the island offers Retry
+
+    def test_app_that_runs_a_while_then_quits_is_a_normal_exit(self):
+        engine, clock, launcher, events = make()
+        insert(engine, "EDITOR")
+        clock.t += 5
+        engine.tick()
+        proc = launcher.started[0][1]
+        clock.t += 600
+        proc.code = 1
+        engine.tick()
+        self.assertEqual(events[-1]["event"], P.EV_APP_EXITED)
+        self.assertEqual(events[-1]["state"], P.IDLE)
+
+    def test_show_environment_parsing(self):
+        from discbay.session import parse_show_environment
+        env = parse_show_environment(
+            "WAYLAND_DISPLAY=wayland-0\nDISPLAY=:1\nXDG_CURRENT_DESKTOP=KDE\n"
+            "ODD=$'a b\\tc'\nnot a line\n")
+        self.assertEqual(env["WAYLAND_DISPLAY"], "wayland-0")
+        self.assertEqual(env["DISPLAY"], ":1")
+        self.assertEqual(env["ODD"], "a b\tc")
+        self.assertNotIn("not a line", env)
+
+    def test_is_graphical_checks_the_socket_is_really_there(self):
+        from discbay.session import is_graphical
+        with tempfile.TemporaryDirectory() as runtime:
+            env = {"XDG_RUNTIME_DIR": runtime, "WAYLAND_DISPLAY": "wayland-0"}
+            self.assertFalse(is_graphical(env))     # left over from a logged-out session
+            open(os.path.join(runtime, "wayland-0"), "w").close()
+            self.assertTrue(is_graphical(env))
+        self.assertFalse(is_graphical({}))
+
+    def test_launched_apps_get_the_desktop_environment(self):
+        from unittest import mock
+        from discbay import session
+        from discbay.engine import SubprocessLauncher
+        session._cache = None
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(session, "manager_environment",
+                                  return_value={"WAYLAND_DISPLAY": "wayland-7"}):
+            out = os.path.join(tmp, "env")
+            launcher = SubprocessLauncher()
+            proc = launcher.start(LaunchSpec("command", f"sh -c 'echo $WAYLAND_DISPLAY > {out}'"))
+            proc.wait(5)
+            with open(out) as f:
+                self.assertEqual(f.read().strip(), "wayland-7")
+        session._cache = None

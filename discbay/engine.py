@@ -22,7 +22,7 @@ import subprocess
 import time
 from typing import Callable, Protocol
 
-from . import drive, protocol as P
+from . import drive, protocol as P, session
 from .config import Config, Disc, launch_is_local, merge_local
 from .launch import LaunchError, LaunchSpec, is_handoff
 from .trust import MemoryTrust, TrustStore
@@ -53,9 +53,16 @@ class SubprocessLauncher:
     def __init__(self):
         self._children: list[list] = []  # [proc, kill_deadline or None]
 
+    def session_ready(self) -> bool:
+        """Is there a desktop to open the app's window on yet?"""
+        return session.is_graphical(session.environment())
+
     def start(self, spec: LaunchSpec) -> subprocess.Popen:
         argv = spec.to_argv()
-        proc = subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL)
+        # The desktop session's environment, not the one the daemon started
+        # with at login (which has no display: see session.py).
+        proc = subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                                env=session.environment(fresh=True))
         # An app ID can resolve to a hand-off command (Steam shortcuts do), so
         # decide on the real command line, not just the kind.
         proc.detached = spec.detached or (spec.detached_override is None and is_handoff(argv))
@@ -76,7 +83,7 @@ class SubprocessLauncher:
 
     def run(self, command: str) -> None:
         proc = subprocess.Popen(shlex.split(os.path.expanduser(command)), start_new_session=True,
-                                stdin=subprocess.DEVNULL)
+                                stdin=subprocess.DEVNULL, env=session.environment())
         self._children.append([proc, None])
 
     def reap(self) -> None:
@@ -112,6 +119,14 @@ def flatpak_app_id(argv: list[str]) -> str | None:
 
 
 class Engine:
+    # An app that exits with an error this soon after starting didn't really
+    # start: say so, instead of quietly going back to idle.
+    QUICK_EXIT = 5.0
+    # Once the desktop appears, give the frontends a moment to come up
+    # before a disc that was already in the drive starts counting down.
+    SESSION_SETTLE = 3.0
+    WAITING = "Waiting for the desktop"
+
     def __init__(
         self,
         config: Config,
@@ -143,6 +158,8 @@ class Engine:
         self.hold_until = 0.0        # don't autostart or prompt
         self.busy_until = 0.0        # a burn is running: also don't touch the drive
         self._was_held = self._was_busy = False
+        self.launched_at: float | None = None
+        self._session_since: float | None = None
 
     # ------------------------------------------------------------------ output
     def _public_disc(self) -> dict | None:
@@ -324,10 +341,19 @@ class Engine:
             self.state, self.message = P.IDLE, "Paused while DiscBay Studio is open"
         elif not self.trusted:
             self.state, self.message = P.UNTRUSTED, "New disc"
+        elif disc.autostart and not self._session_ready():
+            # Typically: the computer booted with the disc in, and the desktop
+            # isn't up yet. Count down once it is (see tick).
+            self.state, self.message = P.IDLE, self.WAITING
+            self._session_since = None
         elif disc.autostart:
             self._start_countdown()
         else:
             self.state, self.message = P.IDLE, "Ready"
+
+    def _session_ready(self) -> bool:
+        check = getattr(self.launcher, "session_ready", None)
+        return True if check is None else bool(check())
 
     def _start_countdown(self) -> None:
         total = self.disc.countdown if self.disc.countdown is not None else self.config.settings.countdown
@@ -362,12 +388,29 @@ class Engine:
                 self.message = "Disc could not be read"
                 self._emit(P.EV_FAILED)
 
+        if self.state == P.IDLE and self.message == self.WAITING and not self.held:
+            if not self._session_ready():
+                self._session_since = None
+            elif self._session_since is None:
+                self._session_since = now
+            elif now - self._session_since >= self.SESSION_SETTLE:
+                self._start_countdown()
+                self.message = None
+                self._emit(P.EV_IDENTIFIED)
+
         if self.proc is not None and self.proc.poll() is not None:
+            code = self.proc.poll()
             self.proc = None
             if self.state == P.RUNNING:
-                self.state = P.IDLE
-                self.message = None
-                self._emit(P.EV_APP_EXITED)
+                quick = self.launched_at is not None and now - self.launched_at < self.QUICK_EXIT
+                if quick and code not in (0, None):
+                    self.state = P.ERROR
+                    self.message = f"Closed straight away (exit code {code})"
+                    self._emit(P.EV_FAILED)
+                else:
+                    self.state = P.IDLE
+                    self.message = None
+                    self._emit(P.EV_APP_EXITED)
 
     # ------------------------------------------------------------------ input: user
     def cancel(self) -> bool:
@@ -418,6 +461,10 @@ class Engine:
         assert self.disc is not None and self.disc.launch is not None and self.trusted
         self.countdown_total = None
         self.countdown_ends_at = None
+        if not self._session_ready():
+            self.state, self.message = P.ERROR, "No desktop to open it on yet"
+            self._emit(P.EV_FAILED)
+            return
         try:
             proc = self.launcher.start(self.disc.launch)
         except (LaunchError, OSError, ValueError) as exc:
@@ -427,6 +474,7 @@ class Engine:
             return
         detached = getattr(proc, "detached", self.disc.launch.detached)
         self.proc = None if detached else proc
+        self.launched_at = self.clock()
         self.state = P.RUNNING
         self.message = None
         self._emit(P.EV_LAUNCHED)
