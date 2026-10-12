@@ -8,7 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # DiscBay uses the distro's PyGObject (it needs system GLib), so test
       # with the system Python and apt packages rather than a venv.
@@ -34,8 +34,9 @@ jobs:
       - name: Install build tools
         run: |
           dnf -y install git rpm-build python3-devel pyproject-rpm-macros systemd-rpm-macros \
-            desktop-file-utils python3-gobject python3-flask xorriso rpmlint
-      - uses: actions/checkout@v4
+            desktop-file-utils python3-gobject python3-flask xorriso rpmlint \
+            'dnf-command(builddep)'
+      - uses: actions/checkout@v5
       - name: Build the RPM
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

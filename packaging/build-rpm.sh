@@ -4,7 +4,9 @@
 #   packaging/build-rpm.sh --srpm   build only the source RPM (what COPR uses)
 #
 # Needs:  sudo dnf install rpm-build python3-devel pyproject-rpm-macros \
-#           systemd-rpm-macros desktop-file-utils python3-gobject python3-flask xorriso
+#           systemd-rpm-macros desktop-file-utils python3-gobject python3-flask xorriso \
+#           'dnf-command(builddep)'
+# Any other build dependencies are installed for you (it asks for sudo).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -38,9 +40,29 @@ fi
 
 mode=-ba
 [ "${1:-}" = "--srpm" ] && mode=-bs
-rpmbuild "$mode" packaging/discbay.spec ${RPMBUILD_ARGS:-} \
-  --define "_topdir $top" --define "_sourcedir $top/SOURCES" \
-  --define "_rpmdir $top/RPMS" --define "_srcrpmdir $top/SRPMS"
+build() {
+  rpmbuild "$mode" packaging/discbay.spec ${RPMBUILD_ARGS:-} \
+    --define "_topdir $top" --define "_sourcedir $top/SOURCES" \
+    --define "_rpmdir $top/RPMS" --define "_srcrpmdir $top/SRPMS"
+}
+
+# The spec works out its Python build dependencies from pyproject.toml. When
+# some aren't installed, rpmbuild stops with exit code 11 and leaves a
+# "buildreqs" package listing them: install those and build again.
+status=0
+build || status=$?
+if [ "$status" = 11 ]; then
+  buildreqs=$(ls "$top"/SRPMS/*.buildreqs.nosrc.rpm | head -1)
+  echo
+  echo "Installing the build dependencies rpmbuild asked for..."
+  sudo=""
+  [ "$(id -u)" = 0 ] || sudo=sudo
+  $sudo dnf -y builddep "$buildreqs"
+  rm -f "$top"/SRPMS/*.buildreqs.nosrc.rpm
+  status=0
+  build || status=$?
+fi
+[ "$status" = 0 ] || exit "$status"
 
 find "$top/RPMS" "$top/SRPMS" -name '*.rpm' -exec cp {} "$outdir/" \; 2>/dev/null || true
 echo

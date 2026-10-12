@@ -70,12 +70,13 @@ its services would otherwise take priority over the RPM's.
 
 ```sh
 sudo dnf install rpm-build python3-devel pyproject-rpm-macros systemd-rpm-macros \
-  desktop-file-utils python3-gobject python3-flask xorriso
+  desktop-file-utils python3-gobject python3-flask xorriso 'dnf-command(builddep)'
 packaging/build-rpm.sh
 sudo dnf install dist/discbay-*.noarch.rpm
 ```
 
-The build runs the test suite. `packaging/build-rpm.sh --srpm` makes just
+The script installs any remaining Python build dependencies itself (it asks
+for your password once). The build runs the test suite. `packaging/build-rpm.sh --srpm` makes just
 the source RPM. Bump the version in both `pyproject.toml` and
 `packaging/discbay.spec` (the script checks they match), and add a
 `%changelog` entry.
