@@ -310,44 +310,44 @@ function setupCropper() {
     const file = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/"));
     if (file) useImage(URL.createObjectURL(file));
   });
-  // The whole page accepts a dropped image, so a near miss still works.
-  window.addEventListener("dragover", (e) => e.preventDefault());
-  window.addEventListener("drop", (e) => {
-    e.preventDefault();
-    const file = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
-    if (file) useImage(URL.createObjectURL(file));
-  });
+    // The whole page accepts a dropped image, so a near miss still works.
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const file = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
+      if (file) useImage(URL.createObjectURL(file));
+    });
 
-  // Drag to reposition.
-  let drag = null;
-  zone.addEventListener("pointerdown", (e) => {
-    if (state.coverSource !== "image") return;
-    zone.setPointerCapture(e.pointerId);
-    const ratio = crop.size / zone.clientWidth;
-    drag = { x: e.clientX, y: e.clientY, ox: crop.x, oy: crop.y, ratio, moved: false };
-  });
-  zone.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const dx = (e.clientX - drag.x) * drag.ratio, dy = (e.clientY - drag.y) * drag.ratio;
-    if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-    crop.x = drag.ox + dx; crop.y = drag.oy + dy;
-    clampCrop(); drawCrop(); updatePreview();
-  });
-  const end = () => { drag = null; };
-  zone.addEventListener("pointerup", end);
-  zone.addEventListener("pointercancel", end);
-  zone.addEventListener("wheel", (e) => {
-    if (state.coverSource !== "image") return;
-    e.preventDefault();
-    setZoom(crop.zoom * (e.deltaY < 0 ? 1.06 : 1 / 1.06));
-  }, { passive: false });
+      // Drag to reposition.
+      let drag = null;
+      zone.addEventListener("pointerdown", (e) => {
+        if (state.coverSource !== "image") return;
+        zone.setPointerCapture(e.pointerId);
+        const ratio = crop.size / zone.clientWidth;
+        drag = { x: e.clientX, y: e.clientY, ox: crop.x, oy: crop.y, ratio, moved: false };
+      });
+      zone.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const dx = (e.clientX - drag.x) * drag.ratio, dy = (e.clientY - drag.y) * drag.ratio;
+        if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
+        crop.x = drag.ox + dx; crop.y = drag.oy + dy;
+        clampCrop(); drawCrop(); updatePreview();
+      });
+      const end = () => { drag = null; };
+      zone.addEventListener("pointerup", end);
+      zone.addEventListener("pointercancel", end);
+      zone.addEventListener("wheel", (e) => {
+        if (state.coverSource !== "image") return;
+        e.preventDefault();
+        setZoom(crop.zoom * (e.deltaY < 0 ? 1.06 : 1 / 1.06));
+      }, { passive: false });
 
-  $("#zoom").addEventListener("input", (e) => setZoom(parseFloat(e.target.value)));
-  $("#autoCrop").addEventListener("click", () => { smartCrop(); drawCrop(); updatePreview(); });
-  $("#useIcon").addEventListener("click", useIconCover);
-  $("#useSteamArt").addEventListener("click", () => state.target?.artUrl && useImage(state.target.artUrl, { auto: true }));
-  $("#clearCover").addEventListener("click", clearCover);
-  $("#color").addEventListener("input", (e) => setAccent(e.target.value, { fromUser: true }));
+      $("#zoom").addEventListener("input", (e) => setZoom(parseFloat(e.target.value)));
+      $("#autoCrop").addEventListener("click", () => { smartCrop(); drawCrop(); updatePreview(); });
+      $("#useIcon").addEventListener("click", useIconCover);
+      $("#useSteamArt").addEventListener("click", () => state.target?.artUrl && useImage(state.target.artUrl, { auto: true }));
+      $("#clearCover").addEventListener("click", clearCover);
+      $("#color").addEventListener("input", (e) => setAccent(e.target.value, { fromUser: true }));
 }
 
 function setZoom(z) {
@@ -425,14 +425,14 @@ async function loadApps() {
 function renderApps() {
   const box = $("#appTiles"), q = $("#appSearch").value.trim().toLowerCase(), gamesOnly = $("#gamesOnly").checked;
   const apps = (state.loaded.apps || []).filter((a) =>
-    (!gamesOnly || a.game) && (!q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)));
+  (!gamesOnly || a.game) && (!q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q)));
   if (!apps.length) return emptyState(box, q || gamesOnly ? "No apps match." : "No apps found.");
   box.innerHTML = "";
   for (const a of apps) {
     const iconUrl = a.has_icon ? `/api/icon/${encodeURIComponent(a.id)}` : null;
     const tile = makeTile({
       label: a.name, imgUrl: iconUrl, glyph: a.name[0]?.toUpperCase() || "?", title: a.id,
-      onPick: (el) => selectTarget({ kind: "app", value: a.id, name: a.name, iconUrl }, el),
+                          onPick: (el) => selectTarget({ kind: "app", value: a.id, name: a.name, iconUrl }, el),
     });
     if (state.target?.kind === "app" && state.target.value === a.id) tile.setAttribute("aria-selected", "true");
     box.append(tile);
@@ -449,7 +449,7 @@ async function loadSteam() {
     const artUrl = g.has_art ? `/api/steam/${g.id}/art` : null;
     box.append(makeTile({
       label: g.name, imgUrl: artUrl, glyph: g.name[0]?.toUpperCase() || "?", title: `Steam app ${g.id}`,
-      onPick: (el) => selectTarget({ kind: "steam", value: g.id, name: g.name, artUrl }, el),
+                        onPick: (el) => selectTarget({ kind: "steam", value: g.id, name: g.name, artUrl }, el),
     }));
   }
 }
@@ -479,15 +479,18 @@ const OTHER = {
   command: ["Command", "retroarch -L core.so ~/roms/game.sfc"],
   steam: ["Steam app ID", "1536610"],
 };
+const isWebsite = (t) => t?.kind === "url" && /^https?:\/\//i.test(t.value || "");
 function otherChanged() {
   const kind = $("#otherKind").value, value = $("#otherTarget").value.trim();
+  // Websites can open like a game: in their own full-screen window instead of a tab.
+  $("#windowField").hidden = !(kind === "url" && /^https?:\/\//i.test(value));
   $("#otherLabel").textContent = OTHER[kind][0];
   $("#otherTarget").placeholder = OTHER[kind][1];
   if (!value) { state.target = null; refresh(); return; }
   const base = value.replace(/\/+$/, "").split("/").pop().replace(/\.(AppImage|sh|x86_64)$/i, "");
   const name = kind === "url" && /^https?:/.test(value) ? new URL(value, location.href).hostname.replace(/^www\./, "")
-             : kind === "command" ? value.split(/\s+/)[0].split("/").pop()
-             : kind === "steam" ? `Steam game ${value}` : base;
+  : kind === "command" ? value.split(/\s+/)[0].split("/").pop()
+  : kind === "steam" ? `Steam game ${value}` : base;
   state.target = { kind, value, name };
   if (!state.nameTouched) { $("#name").value = name; if (!state.labelTouched) $("#label").value = labelFromName(name); }
   refresh();
@@ -505,6 +508,7 @@ function setupSources() {
   $("#gamesOnly").addEventListener("change", renderApps);
   $("#otherKind").addEventListener("change", otherChanged);
   $("#otherTarget").addEventListener("input", otherChanged);
+  $("#window").addEventListener("change", refresh);
   state.loaded.apps = true;
   loadApps();
 }
@@ -522,6 +526,7 @@ function spec() {
     close_on_eject: $("#closeOnEject").checked,
     args: args && ["app", "exec"].includes(state.target?.kind) ? args.match(/(?:[^\s"]+|"[^"]*")+/g).map((a) => a.replace(/^"|"$/g, "")) : [],
     has_cover: Boolean(state.coverSource),
+    window: isWebsite(state.target) ? $("#window").value : null,
   };
 }
 
@@ -529,7 +534,7 @@ let checkTimer = 0, lastCheck = { ok: false };
 function refresh() {
   const s = spec();
   $("#islandTitle").textContent = s.name || "Your disc";
-  $("#islandSub").textContent = s.autostart ? `Inserted, starting in ${s.countdown ?? 5}` : "Ready";
+  $("#islandSub").textContent = s.autostart ? `Inserted · starting in ${s.countdown ?? 5}` : "Ready";
   $("#islandButtons").querySelector(".island-btn").hidden = !s.autostart;
   $("#countdown").disabled = !s.autostart;
   clearTimeout(checkTimer);
@@ -565,7 +570,7 @@ function describeDrive(st) {
     case "appendable":
       if (m.discbay) return ["ok", st.current || m.label || "DiscBay disc", rewrites || "Can be rewritten",
         `This disc opens ${st.current || m.label}. Burning replaces it. ${rewrites ? rewrites + "." : ""}`];
-      return ["ok", "Disc with other files", "DiscBay's files will be added", "This disc already holds other files. They'll be kept, and DiscBay's files added."];
+    return ["ok", "Disc with other files", "DiscBay's files will be added", "This disc already holds other files. They'll be kept, and DiscBay's files added."];
     case "complete": return ["warn", m.label ? `${m.label}, closed` : "Closed disc", "Can't be written again",
       "This disc is closed, so it can't be written again. Insert a blank CD-R or a CD-RW."];
     default: return ["", "Checking the drive", "", ""];
@@ -721,8 +726,8 @@ function labelItems() {
   const cover = renderCover(1440);   // about 300 dpi across a 118 mm label
   const disc = $("#labelDisc").checked ? labels.discLabel({
     cover, name: s.name, subtitle: s.subtitle, showName: $("#labelName").checked }) : null;
-  const spine = $("#labelSpine").checked ? labels.spineLabel({ name: s.name || "Disc", subtitle: s.subtitle, color: s.color }) : null;
-  return labels.layout({ slots: labelSlots, disc, spine });
+    const spine = $("#labelSpine").checked ? labels.spineLabel({ name: s.name || "Disc", subtitle: s.subtitle, color: s.color }) : null;
+    return labels.layout({ slots: labelSlots, disc, spine });
 }
 function nudgeFromForm() {
   const nudge = { x: Number($("#nudgeX").value) || 0, y: Number($("#nudgeY").value) || 0 };

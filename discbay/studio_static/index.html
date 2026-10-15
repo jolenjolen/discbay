@@ -33,7 +33,7 @@
         <div class="mini-disc" id="miniDisc"></div>
         <div class="island-text">
           <div class="island-title" id="islandTitle">Your disc</div>
-          <div class="island-sub" id="islandSub">Inserted, starting in 5</div>
+          <div class="island-sub" id="islandSub">Inserted · starting in 5</div>
         </div>
         <div class="island-buttons" id="islandButtons">
           <span class="island-btn">Cancel</span>
@@ -99,6 +99,15 @@
             <label class="field grow">
               <span id="otherLabel">Path to the program</span>
               <input type="text" id="otherTarget" placeholder="~/Games/Celeste/Celeste">
+            </label>
+            <label class="field" id="windowField" hidden>
+              <span>Opens</span>
+              <select id="window">
+                <option value="tab">In a browser tab</option>
+                <option value="app">In its own window</option>
+                <option value="fullscreen" selected>Full screen, like a game</option>
+                <option value="kiosk">Kiosk (eject to leave)</option>
+              </select>
             </label>
           </div>
         </div>

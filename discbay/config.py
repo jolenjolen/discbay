@@ -19,7 +19,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .launch import KINDS, LaunchSpec, parse_launch
+from .launch import KINDS, LaunchSpec, parse_launch, parse_window
 
 MANIFEST_NAME = "discbay.toml"   # stored on disc as DISCBAY.TOM or DISCBAY.TOML
 MANIFEST_POLICIES = ("ask", "always", "never")
@@ -59,6 +59,7 @@ class Disc:
     source: str = "local"           # "local" (your discs.toml) or "disc" (manifest on the disc)
     fingerprint: str | None = None  # identifies a manifest for the trust store
     explicit: frozenset = frozenset()  # keys actually written in the table this came from
+    window: str | None = None       # a local `window = ...` on its own, applied to the disc's url
 
     def public(self) -> dict:
         """What frontends get to see. The launch target is not included."""
@@ -117,6 +118,7 @@ def _disc_from_table(label: str, entry: dict, where: str, source: str) -> Disc:
     countdown = entry.get("countdown")
     try:
         launch = parse_launch(entry, where)
+        window = parse_window(entry, where)
         countdown = float(countdown) if countdown is not None else None
     except (ValueError, TypeError) as exc:
         raise ConfigError(str(exc)) from exc
@@ -137,6 +139,7 @@ def _disc_from_table(label: str, entry: dict, where: str, source: str) -> Disc:
         close_command=entry.get("close_command") if source == "local" else None,
         source=source,
         explicit=frozenset(entry),
+        window=window,
     )
 
 
@@ -154,6 +157,9 @@ def merge_local(manifest: Disc, local: Disc) -> Disc:
     if local.launch is not None:
         changes["launch"] = local.launch
         changes["source"] = "local"
+    elif "window" in local.explicit and manifest.launch is not None and manifest.launch.kind == "url":
+        # e.g. `window = "fullscreen"` to open an already-burned web disc full screen.
+        changes["launch"] = dataclasses.replace(manifest.launch, window=local.window)
     return dataclasses.replace(manifest, **changes)
 
 

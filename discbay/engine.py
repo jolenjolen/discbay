@@ -59,6 +59,7 @@ class SubprocessLauncher:
 
     def start(self, spec: LaunchSpec) -> subprocess.Popen:
         argv = spec.to_argv()
+        spec.prepare()
         # The desktop session's environment, not the one the daemon started
         # with at login (which has no display: see session.py).
         proc = subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
@@ -66,7 +67,10 @@ class SubprocessLauncher:
         # An app ID can resolve to a hand-off command (Steam shortcuts do), so
         # decide on the real command line, not just the kind.
         proc.detached = spec.detached or (spec.detached_override is None and is_handoff(argv))
-        proc.flatpak_id = flatpak_app_id(argv)
+        # A web disc runs a separate copy of the browser with DiscBay's own
+        # profile: "flatpak kill" would close your everyday browser too, so
+        # only its own processes are stopped.
+        proc.flatpak_id = None if spec.window else flatpak_app_id(argv)
         self._children.append([proc, None])
         return proc
 

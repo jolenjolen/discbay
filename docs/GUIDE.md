@@ -37,10 +37,11 @@ your app menu.
 
 The island uses the layer-shell protocol, which KDE Plasma, Sway, Hyprland
 and COSMIC support. On other desktops it falls back to a plain window.
-It drops in just below a top panel rather than over it. On Plasma it asks
-the shell where its panels are each time it appears, so it also clears panels
-set to dodge windows or let windows go over them (which reserve no space);
-on other desktops it keeps clear of any panel that reserves space. To have it float over panels instead,
+It drops in just below a top panel rather than over it. On KDE a small KWin
+script (loaded while the island runs) tells it where the panels are live, so
+the island opens on the screen you're using, moves up when a panel auto-hides
+or a fullscreen window covers it, and glides back down when the panel
+returns. On other desktops it keeps clear of any panel that reserves space. To have it float over panels instead,
 run `systemctl --user edit discbay-island` and add:
 
 ```ini
@@ -147,6 +148,42 @@ Pick one launch target:
 
 Find desktop IDs with `ls /usr/share/applications` or
 `flatpak list --app --columns=application`.
+
+### Websites that open like a game
+
+Add `--window` to a website `--url` (or pick **Opens** in Studio) and the
+site opens without tabs or an address bar, like a native game. Handy for
+cloud gaming:
+
+```sh
+discbay-ctl burn --label FORTNITE --name "Fortnite" --close-on-eject \
+    --url "<the game's page on xbox.com/play>" --window fullscreen
+```
+
+| `--window` | Opens |
+|---|---|
+| `tab` | In a normal browser tab (the default) |
+| `app` | In its own window, no tabs or address bar |
+| `fullscreen` | That, full screen (F11 still leaves it) |
+| `kiosk` | Full screen with no way out but closing it, or ejecting with `--close-on-eject` |
+
+The disc stores only the website and how to open it, so it works on any
+computer: DiscBay picks the browser. It prefers a Chromium-based one
+(Chromium, Chrome, Edge, Brave, Vivaldi, native or Flatpak), as only those can
+open a site as an app; with only Firefox, it opens a window of its own, full
+screen for `fullscreen` and `kiosk`. To choose a browser yourself, set
+`DISCBAY_BROWSER` (e.g. `google-chrome` or `com.microsoft.Edge`) with
+`systemctl --user edit discbayd`.
+
+The browser gets its own DiscBay profile, so it always starts as a separate
+copy (your everyday browser windows are never touched) that ejecting the
+disc can close. Sign in to the site once in that window and it stays signed
+in. To make an already-burned web disc open this way, add one line locally:
+
+```toml
+[discs.FORTNITE]
+window = "fullscreen"
+```
 
 ## Trust
 

@@ -179,6 +179,7 @@ def _spec_from_json(data: dict, art_path: str | None) -> discmaker.DiscSpec:
             countdown=float(countdown) if countdown not in (None, "") else None,
             close_on_eject=bool(data.get("close_on_eject")),
             autostart=bool(data.get("autostart", True)),
+            window=str(data["window"]) if data.get("window") else None,
         )
     except (TypeError, ValueError) as exc:
         raise discmaker.DiscError(f"Invalid disc details: {exc}") from exc

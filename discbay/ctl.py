@@ -130,7 +130,8 @@ def spec_from_args(args) -> discmaker.DiscSpec:
     return discmaker.DiscSpec(
         label=args.label, name=args.name, target_kind=kind, target=str(value),
         args=args.arg or [], subtitle=args.subtitle, color=args.color, art_path=args.art,
-        countdown=args.countdown, close_on_eject=args.close_on_eject, autostart=not args.no_autostart)
+        countdown=args.countdown, close_on_eject=args.close_on_eject, autostart=not args.no_autostart,
+        window=args.window)
 
 
 def cmd_make_disc(args) -> int:
@@ -220,6 +221,9 @@ def add_disc_options(p: argparse.ArgumentParser) -> None:
     target.add_argument("--url", help="URL or file to open with the default app")
     target.add_argument("--command", help="full command line")
     p.add_argument("--arg", action="append", help="argument for --app/--exec (repeatable)")
+    p.add_argument("--window", choices=("tab", "app", "fullscreen", "kiosk"),
+                   help="with a website --url: open it in a browser tab (default), its own app window, "
+                        "full screen, or kiosk (full screen, no way out but ejecting)")
     p.add_argument("--countdown", type=float)
     p.add_argument("--close-on-eject", action="store_true", help="close the app when the disc is removed")
     p.add_argument("--no-autostart", action="store_true", help="show a Start button instead of a countdown")

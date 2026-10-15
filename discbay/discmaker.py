@@ -41,6 +41,7 @@ class DiscSpec:
     countdown: float | None = None
     close_on_eject: bool = False
     autostart: bool = True
+    window: str | None = None        # url only: "app", "fullscreen" or "kiosk"
 
 
 def label_from_name(name: str) -> str:
@@ -70,6 +71,8 @@ def build_manifest(spec: DiscSpec) -> str:
         lines.append(f"steam = {int(spec.target)}")
     else:
         lines.append(f"{spec.target_kind} = {_toml_str(spec.target)}")
+    if spec.window and spec.window != "tab":
+        lines.append(f"window = {_toml_str(spec.window)}")
     if spec.args:
         lines.append("args = [" + ", ".join(_toml_str(a) for a in spec.args) + "]")
     if spec.countdown is not None:

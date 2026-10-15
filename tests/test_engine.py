@@ -3,6 +3,7 @@ import os
 import stat
 import tempfile
 import unittest
+import unittest.mock
 
 from discbay import drive, protocol as P
 from discbay.config import ConfigError, parse, parse_manifest
@@ -703,3 +704,82 @@ class DesktopSessionTests(unittest.TestCase):
             with open(out) as f:
                 self.assertEqual(f.read().strip(), "wayland-7")
         session._cache = None
+
+
+class WebWindowTests(unittest.TestCase):
+    """Websites that open like a game: url + window."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.bin = os.path.join(self.tmp.name, "bin")
+        os.makedirs(self.bin)
+        self.env = unittest.mock.patch.dict(os.environ, {
+            "PATH": self.bin, "XDG_DATA_HOME": os.path.join(self.tmp.name, "data"),
+            "HOME": self.tmp.name, "DISCBAY_BROWSER": ""})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def fake(self, name):
+        path = os.path.join(self.bin, name)
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def spec(self, window, url="https://www.xbox.com/play"):
+        return parse_launch({"url": url, "window": window}, "t")
+
+    def test_window_needs_a_website(self):
+        with self.assertRaises(ValueError):
+            parse_launch({"command": "foo", "window": "fullscreen"}, "t")
+        with self.assertRaises(ValueError):
+            parse_launch({"url": "~/Music", "window": "app"}, "t")
+        with self.assertRaises(ValueError):
+            parse_launch({"url": "https://x.org", "window": "huge"}, "t")
+        self.assertIsNone(parse_launch({"url": "https://x.org", "window": "tab"}, "t").window)
+
+    def test_chromium_opens_full_screen_app_with_its_own_profile(self):
+        chrome = self.fake("google-chrome")
+        self.fake("firefox")
+        spec = self.spec("fullscreen")
+        argv = spec.to_argv()
+        self.assertEqual(argv[0], chrome)                       # Chromium-based wins over Firefox
+        self.assertIn("--app=https://www.xbox.com/play", argv)
+        self.assertIn("--start-fullscreen", argv)
+        self.assertTrue(any(a.startswith("--user-data-dir=") for a in argv))
+        self.assertFalse(spec.detached)                         # tracked, so eject can close it
+        self.assertIn("full screen", spec.describe())
+        self.assertIn("--kiosk", self.spec("kiosk").to_argv())
+
+    def test_firefox_fallback_and_profile_is_created(self):
+        self.fake("firefox")
+        spec = self.spec("fullscreen")
+        argv = spec.to_argv()
+        self.assertEqual(argv[-1], "https://www.xbox.com/play")
+        self.assertIn("--kiosk", argv)
+        profile = argv[argv.index("--profile") + 1]
+        spec.prepare()
+        self.assertTrue(os.path.isdir(profile))
+
+    def test_no_browser_is_a_clear_error(self):
+        with self.assertRaises(LaunchError):
+            self.spec("app").to_argv()
+
+    def test_local_window_line_upgrades_a_burned_web_disc(self):
+        from discbay.config import merge_local
+        manifest = parse_manifest(b'name = "Fortnite"\nurl = "https://www.xbox.com/play"\n', "FN")
+        local = parse('[discs.FN]\nwindow = "fullscreen"\n').find("FN")
+        merged = merge_local(manifest, local)
+        self.assertEqual(merged.launch.window, "fullscreen")
+        self.assertEqual(merged.launch.value, "https://www.xbox.com/play")
+
+    def test_studio_and_ctl_write_it_onto_the_disc(self):
+        from discbay import discmaker
+        spec = discmaker.DiscSpec(label="FN", name="Fortnite", target_kind="url",
+                                  target="https://www.xbox.com/play", window="kiosk")
+        self.assertIn('window = "kiosk"', discmaker.build_manifest(spec))
+        disc, _, _ = discmaker.prepare(spec)
+        self.assertEqual(disc.launch.window, "kiosk")
